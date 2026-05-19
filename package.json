@@ -1,0 +1,35 @@
+{
+  "name": "pdf-tagging-preview",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.13.2",
+    "@emotion/styled": "^11.13.0",
+    "@mui/icons-material": "^5.17.0",
+    "@mui/material": "^5.17.7",
+    "pdfjs-dist": "^5.7.284",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^14.2.0",
+    "@testing-library/user-event": "^14.6.0",
+    "@types/jest": "^29.5.5",
+    "@types/node": "^20.14.2",
+    "@types/react": "^18.3.4",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.1",
+    "vitest": "^4.1.6"
+  }
+}
