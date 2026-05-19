@@ -287,6 +287,22 @@ export default function PdfTagViewer({ fileUrl, annotations }: PdfTagViewerProps
     return () => observer.disconnect();
   }, [pdfDoc, pageCount, renderPage, scale]);
 
+  useEffect(() => {
+    if (!pdfDoc || pageCount === 0) {
+      return;
+    }
+
+    // Render first page immediately on load to prevent blank display
+    // Use a small timeout to ensure DOM refs are populated
+    const timer = setTimeout(() => {
+      renderPage(1).catch(() => {
+        /* ignore */
+      });
+    }, 0);
+
+    return () => clearTimeout(timer);
+  }, [pdfDoc, pageCount, renderPage]);
+
   const pageRects = useMemo(() => {
     return detectedTags
       .map((tag) => {
@@ -467,49 +483,11 @@ export default function PdfTagViewer({ fileUrl, annotations }: PdfTagViewerProps
                         </Box>
                       ) : null}
                     </Box>
-                    <Box sx={{ position: 'absolute', top: 8, left: 8, bgcolor: 'rgba(255,255,255,0.92)', px: 1, py: 0.5, borderRadius: 1, boxShadow: 1 }}>
-                      <Typography variant="caption">Page {pageNumber}</Typography>
-                    </Box>
                   </Box>
                 );
               })
             )}
           </Box>
-        </Paper>
-
-        <Paper variant="outlined" sx={{ p: 2, maxHeight: 520, overflowY: 'auto' }}>
-          <Typography variant="h6" mb={1}>
-            Detected tags
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
-          {pageRects.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              {annotations.length === 0
-                ? 'No annotations were provided. Pass annotations via props to visualize matches.'
-                : 'No matches were found for the provided annotations.'}
-            </Typography>
-          ) : (
-            pageRects.map((rect) => (
-              <Paper
-                key={rect.id}
-                onClick={() => scrollToTag(rect)}
-                sx={{
-                  p: 1.25,
-                  mb: 1,
-                  cursor: 'pointer',
-                  '&:hover': { backgroundColor: 'action.hover' },
-                }}
-                variant="outlined"
-              >
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textTransform: 'capitalize' }}>
-                  {rect.type} • page {rect.page}
-                </Typography>
-                <Typography variant="body2" noWrap>
-                  {rect.text}
-                </Typography>
-              </Paper>
-            ))
-          )}
         </Paper>
       </Box>
     </Box>
