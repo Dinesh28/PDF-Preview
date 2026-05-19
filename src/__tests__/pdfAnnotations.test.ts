@@ -36,6 +36,14 @@ describe('pdfAnnotations utilities', () => {
     expect(matches[0]).toMatchObject({ startSpanIndex: 0, endSpanIndex: 2 });
   });
 
+  test('findPhraseBounds matches text inside a single span with spaces', () => {
+    const textItems = [{ str: 'REQUEST FOR PROPOSALS' }];
+
+    const matches = findPhraseBounds('REQUEST FOR PROPOSALS', textItems as any);
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({ startSpanIndex: 0, endSpanIndex: 0 });
+  });
+
   test('buildAnnotationsFromInputs converts inputs into annotations', () => {
     const annotations = buildAnnotationsFromInputs({
       sections: ['REQUEST FOR PROPOSALS'],

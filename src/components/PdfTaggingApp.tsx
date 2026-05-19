@@ -1,6 +1,6 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { Autocomplete, Box, Button, Chip, Container, Grid, Paper, TextField, Typography, Alert } from '@mui/material';
-import PdfBadgeViewer from './PdfBadgeViewer';
+import PdfTagViewer from './PdfTagViewer';
 import { buildAnnotationsFromInputs, sanitizeAnnotations } from '../utils/pdfAnnotations';
 import { PdfAnnotation } from '../types';
 
@@ -136,7 +136,7 @@ export default function PdfTaggingApp() {
         </Box>
       </Paper>
 
-      <PdfBadgeViewer pdfUrl={pdfUrl} annotations={annotations} />
+      <PdfTagViewer fileUrl={pdfUrl} annotations={annotations} />
     </Container>
   );
 }

@@ -67,11 +67,9 @@ export function findPhraseBounds(phrase: string, textItems: Array<{ str: string 
 
   const sourceChars: Array<{ itemIndex: number; char: string }> = [];
   const rawText = textItems.map((item, itemIndex) => {
-    const normalizedItem = normalizeText(item.str ?? '');
+    const normalizedItem = normalizeText(item.str ?? '').replace(/\s+/g, '');
     for (const char of normalizedItem) {
-      if (char) {
-        sourceChars.push({ itemIndex, char });
-      }
+      sourceChars.push({ itemIndex, char });
     }
     return normalizedItem;
   });

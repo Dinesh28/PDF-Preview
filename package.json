@@ -1,25 +1,37 @@
 {
-  "name": "pdf-tagging-preview",
-  "private": true,
+  "name": "react-pdf-tag-viewer",
+  "private": false,
   "version": "0.1.0",
   "type": "module",
+  "main": "dist/react-pdf-tag-viewer.cjs.js",
+  "module": "dist/react-pdf-tag-viewer.es.js",
+  "types": "dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc -p tsconfig.build.json && vite build",
     "preview": "vite preview",
     "test": "vitest",
     "test:coverage": "vitest run --coverage"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@emotion/react": "^11.13.2",
     "@emotion/styled": "^11.13.0",
     "@mui/icons-material": "^5.17.0",
     "@mui/material": "^5.17.7",
-    "pdfjs-dist": "^5.7.284",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
+  "dependencies": {
+    "pdfjs-dist": "^5.7.284"
+  },
   "devDependencies": {
+    "@emotion/react": "^11.13.2",
+    "@emotion/styled": "^11.13.0",
+    "@mui/icons-material": "^5.17.0",
+    "@mui/material": "^5.17.7",
     "@testing-library/jest-dom": "^6.0.0",
     "@testing-library/react": "^14.2.0",
     "@testing-library/user-event": "^14.6.0",

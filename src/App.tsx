@@ -1,11 +1,11 @@
 import { CssBaseline } from '@mui/material';
-import PdfTaggingApp from './components/PdfTaggingApp';
+import PdfTagViewerDemo from './components/PdfTagViewerDemo';
 
 function App() {
   return (
     <>
       <CssBaseline />
-      <PdfTaggingApp />
+      <PdfTagViewerDemo />
     </>
   );
 }

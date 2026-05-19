@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
-import { Box, Button, CircularProgress, Divider, IconButton, Paper, Typography } from '@mui/material';
+import { Box, CircularProgress, Divider, IconButton, Paper, Typography } from '@mui/material';
 import FitScreenIcon from '@mui/icons-material/FitScreen';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
@@ -15,8 +15,8 @@ const MIN_SCALE = 0.6;
 const MAX_SCALE = 2.4;
 const SCALE_STEP = 0.2;
 
-type PdfBadgeViewerProps = {
-  pdfUrl: string;
+type PdfTagViewerProps = {
+  fileUrl: string;
   annotations: PdfAnnotation[];
 };
 
@@ -71,14 +71,13 @@ function computeMatchRect(
   };
 }
 
-export default function PdfBadgeViewer({ pdfUrl, annotations }: PdfBadgeViewerProps) {
+export default function PdfTagViewer({ fileUrl, annotations }: PdfTagViewerProps) {
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
   const [pageCount, setPageCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detectedTags, setDetectedTags] = useState<DetectedTag[]>([]);
   const [scale, setScale] = useState(1.2);
-  const [renderedPages, setRenderedPages] = useState<Set<number>>(new Set());
 
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -93,24 +92,26 @@ export default function PdfBadgeViewer({ pdfUrl, annotations }: PdfBadgeViewerPr
     let canceled = false;
 
     async function loadDocument() {
-      if (!pdfUrl) {
+      if (!fileUrl) {
         setPdfDoc(null);
         setPageCount(0);
         setDetectedTags([]);
         setError(null);
+        pageTextItems.current.clear();
+        pageViewportCache.current.clear();
+        renderTask.current.clear();
         return;
       }
 
       setLoading(true);
       setError(null);
       setDetectedTags([]);
-      setRenderedPages(new Set());
       pageTextItems.current.clear();
       pageViewportCache.current.clear();
       renderTask.current.clear();
 
       try {
-        const loadingTask = pdfjsLib.getDocument({ url: pdfUrl, useSystemFonts: true });
+        const loadingTask = pdfjsLib.getDocument({ url: fileUrl, useSystemFonts: true });
         const doc = await loadingTask.promise;
         if (canceled) {
           return;
@@ -139,12 +140,12 @@ export default function PdfBadgeViewer({ pdfUrl, annotations }: PdfBadgeViewerPr
     return () => {
       canceled = true;
     };
-  }, [pdfUrl]);
+  }, [fileUrl]);
 
   const detectDocument = useCallback(
     async (doc: pdfjsLib.PDFDocumentProxy) => {
-      const annotationsToSearch = annotations || [];
       const matches: DetectedTag[] = [];
+      const annotationsToSearch = annotations || [];
 
       for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
         const page = await doc.getPage(pageNumber);
@@ -189,6 +190,7 @@ export default function PdfBadgeViewer({ pdfUrl, annotations }: PdfBadgeViewerPr
     async function detect() {
       setLoading(true);
       setDetectedTags([]);
+
       try {
         await detectDocument(pdfDocument);
       } catch (detectError: any) {
@@ -249,7 +251,6 @@ export default function PdfBadgeViewer({ pdfUrl, annotations }: PdfBadgeViewerPr
       promise.finally(() => renderTask.current.delete(pageNumber));
 
       await promise;
-      setRenderedPages((previous) => new Set(previous).add(pageNumber));
     },
     [pdfDoc, scale],
   );
@@ -294,28 +295,35 @@ export default function PdfBadgeViewer({ pdfUrl, annotations }: PdfBadgeViewerPr
         if (!viewport || !items) {
           return null;
         }
-        return computeMatchRect(viewport, items, tag.startSpanIndex, tag.endSpanIndex, tag.id, tag.annotationType, tag.annotationText, tag.page);
+
+        return computeMatchRect(
+          viewport,
+          items,
+          tag.startSpanIndex,
+          tag.endSpanIndex,
+          tag.id,
+          tag.annotationType,
+          tag.annotationText,
+          tag.page,
+        );
       })
       .filter((rect): rect is PageMatchRect => rect !== null);
   }, [detectedTags, scale]);
 
-  const scrollToTag = useCallback(
-    (rect: PageMatchRect) => {
-      const viewer = viewerRef.current;
-      const pageElement = pageRefs.current.get(rect.page);
-      if (!viewer || !pageElement) {
-        return;
-      }
+  const scrollToTag = useCallback((rect: PageMatchRect) => {
+    const viewer = viewerRef.current;
+    const pageElement = pageRefs.current.get(rect.page);
+    if (!viewer || !pageElement) {
+      return;
+    }
 
-      const pageBounds = pageElement.getBoundingClientRect();
-      const viewerBounds = viewer.getBoundingClientRect();
-      const currentScroll = viewer.scrollTop;
-      const targetTop = currentScroll + (pageBounds.top - viewerBounds.top) + rect.top - 20;
+    const pageBounds = pageElement.getBoundingClientRect();
+    const viewerBounds = viewer.getBoundingClientRect();
+    const currentScroll = viewer.scrollTop;
+    const targetTop = currentScroll + (pageBounds.top - viewerBounds.top) + rect.top - 20;
 
-      viewer.scrollTo({ top: targetTop, behavior: 'smooth' });
-    },
-    [viewerRef],
-  );
+    viewer.scrollTo({ top: targetTop, behavior: 'smooth' });
+  }, []);
 
   const handleZoomIn = () => setScale((prev) => Math.min(MAX_SCALE, prev + SCALE_STEP));
   const handleZoomOut = () => setScale((prev) => Math.max(MIN_SCALE, prev - SCALE_STEP));
@@ -374,9 +382,13 @@ export default function PdfBadgeViewer({ pdfUrl, annotations }: PdfBadgeViewerPr
               <Box display="flex" justifyContent="center" alignItems="center" height="100%">
                 <CircularProgress />
               </Box>
+            ) : !fileUrl ? (
+              <Box p={4} textAlign="center">
+                <Typography variant="body1">Provide a fileUrl to preview the document.</Typography>
+              </Box>
             ) : pageCount === 0 ? (
               <Box p={4} textAlign="center">
-                <Typography variant="body1">Enter a PDF URL and submit to preview and tag text.</Typography>
+                <Typography variant="body1">Loading document...</Typography>
               </Box>
             ) : (
               pages.map((pageNumber) => {
@@ -472,7 +484,9 @@ export default function PdfBadgeViewer({ pdfUrl, annotations }: PdfBadgeViewerPr
           <Divider sx={{ mb: 2 }} />
           {pageRects.length === 0 ? (
             <Typography variant="body2" color="text.secondary">
-              No matches were found. Add tags and submit to detect text in the document.
+              {annotations.length === 0
+                ? 'No annotations were provided. Pass annotations via props to visualize matches.'
+                : 'No matches were found for the provided annotations.'}
             </Typography>
           ) : (
             pageRects.map((rect) => (
