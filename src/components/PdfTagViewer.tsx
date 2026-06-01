@@ -14,15 +14,22 @@ import FitScreenIcon from '@mui/icons-material/FitScreen';
 import ZoomInIcon from '@mui/icons-material/ZoomIn';
 import ZoomOutIcon from '@mui/icons-material/ZoomOut';
 import RestoreIcon from '@mui/icons-material/Restore';
+import UndoIcon from '@mui/icons-material/Undo';
+import RedoIcon from '@mui/icons-material/Redo';
 
 import {
   DetectedTag,
   PageMatchRect,
   PdfAnnotation,
+  SelectedParagraph,
   TextItemWithIndex,
+  UserAnnotation,
 } from '../types';
 
 import { findPhraseBounds } from '../utils/pdfAnnotations';
+import { useAnnotationState } from '../hooks/useAnnotationState';
+import ParagraphToolbar from './ParagraphToolbar';
+import AnnotationPanel from './AnnotationPanel';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -114,6 +121,21 @@ export default function PdfTagViewer({
 
   const [scale, setScale] = useState(1.2);
 
+  const [selectedParagraph, setSelectedParagraph] =
+    useState<SelectedParagraph | null>(null);
+
+  const [toolbarAnchor, setToolbarAnchor] =
+    useState<HTMLElement | null>(null);
+
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<
+    string | null
+  >(null);
+
+  const [pageTextItemsState, setPageTextItemsState] =
+    useState<Record<number, TextItemWithIndex[]>>({});
+
+  const annotationState = useAnnotationState();
+
   const viewerRef = useRef<HTMLDivElement | null>(null);
 
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -125,6 +147,8 @@ export default function PdfTagViewer({
 
   const pageViewportCache =
     useRef<Map<number, pdfjsLib.PageViewport>>(new Map());
+
+  const textLayerRefs = useRef<Map<number, any>>(new Map());
 
   const pages = useMemo(
     () => Array.from({ length: pageCount }, (_, i) => i + 1),
@@ -195,6 +219,47 @@ export default function PdfTagViewer({
   /*
    * RENDER PAGE
    */
+  const renderTextLayer = useCallback(
+    async (pageNumber: number, page: pdfjsLib.PDFPageProxy, viewport: pdfjsLib.PageViewport) => {
+      const pageContainer = pageRefs.current.get(pageNumber);
+      if (!pageContainer) return;
+
+      const textLayerDiv = pageContainer.querySelector(
+        '.pdf-text-layer',
+      ) as HTMLDivElement | null;
+      if (!textLayerDiv) return;
+
+      const previousTextLayer = textLayerRefs.current.get(pageNumber);
+      if (previousTextLayer?.cancel) {
+        previousTextLayer.cancel();
+      }
+
+      textLayerDiv.innerHTML = '';
+      textLayerDiv.style.setProperty('--total-scale-factor', `${viewport.scale}`);
+      textLayerDiv.style.position = 'absolute';
+      textLayerDiv.style.inset = '0';
+      textLayerDiv.style.pointerEvents = 'auto';
+      textLayerDiv.style.userSelect = 'text';
+
+      const textContent = await page.getTextContent();
+      const textLayer = new (pdfjsLib as any).TextLayer({
+        textContentSource: textContent,
+        container: textLayerDiv,
+        viewport,
+      });
+
+      textLayerRefs.current.set(pageNumber, textLayer);
+
+      await textLayer.render();
+      textLayer.textDivs?.forEach((div: HTMLElement, index: number) => {
+        if (div instanceof HTMLElement) {
+          div.dataset.spanIndex = String(index);
+        }
+      });
+    },
+    [],
+  );
+
   const renderPage = useCallback(
     async (pageNumber: number) => {
       if (!pdfDoc) return;
@@ -233,12 +298,15 @@ export default function PdfTagViewer({
           viewport,
         };
 
-        await page.render(renderContext).promise;
+        await Promise.all([
+          page.render(renderContext).promise,
+          renderTextLayer(pageNumber, page, viewport),
+        ]);
       } catch (err) {
         console.error(`Failed to render page ${pageNumber}`, err);
       }
     },
-    [pdfDoc, scale],
+    [pdfDoc, renderTextLayer, scale],
   );
 
   /*
@@ -289,6 +357,13 @@ export default function PdfTagViewer({
           }));
 
           pageTextItems.current.set(pageNumber, items);
+          setPageTextItemsState((prev) => {
+            const nextState = {
+              ...(prev as Record<number, TextItemWithIndex[]>),
+              [pageNumber]: items,
+            } as Record<number, TextItemWithIndex[]>;
+            return nextState;
+          });
         }
 
         for (const annotation of annotations) {
@@ -446,6 +521,385 @@ export default function PdfTagViewer({
     setScale(newScale);
   };
 
+  const getAnnotationStyles = (type: PdfAnnotationType) => {
+    if (type === 'section') {
+      return {
+        bgColor: 'rgba(34, 139, 34, 0.08)',
+        borderColor: 'rgba(34, 139, 34, 0.4)',
+        badgeBgColor: '#228b22',
+      };
+    }
+
+    if (type === 'sub-section') {
+      return {
+        bgColor: 'rgba(0, 120, 212, 0.08)',
+        borderColor: 'rgba(0, 120, 212, 0.4)',
+        badgeBgColor: '#0078d4',
+      };
+    }
+
+    if (type === 'question') {
+      return {
+        bgColor: 'rgba(255, 140, 0, 0.08)',
+        borderColor: 'rgba(255, 140, 0, 0.4)',
+        badgeBgColor: '#ff8c00',
+      };
+    }
+
+    return {
+      bgColor: 'rgba(155, 89, 182, 0.08)',
+      borderColor: 'rgba(155, 89, 182, 0.4)',
+      badgeBgColor: '#9b59b6',
+    };
+  };
+
+  const getBadgeLabel = (type: PdfAnnotationType) =>
+    type === 'section'
+      ? 'S'
+      : type === 'sub-section'
+      ? 'SS'
+      : type === 'question'
+      ? 'Q'
+      : 'SQ';
+
+  const renderAnnotationOverlay = (
+    key: string,
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    type: PdfAnnotationType,
+    badgeLabel: string,
+    onBadgeClick: (event: any) => void,
+    onBoxClick?: (event: any) => void,
+  ) => {
+    const { bgColor, borderColor, badgeBgColor } = getAnnotationStyles(type);
+
+    return (
+      <Box
+        key={key}
+        sx={{
+          position: 'absolute',
+          left,
+          top,
+          width,
+          height,
+          pointerEvents: 'auto',
+        }}
+      >
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            backgroundColor: bgColor,
+            border: `1.5px solid ${borderColor}`,
+            borderRadius: '3px',
+            boxSizing: 'border-box',
+            pointerEvents: onBoxClick ? 'auto' : 'none',
+            cursor: onBoxClick ? 'pointer' : 'default',
+            transition: 'all 150ms ease-out',
+            '&:hover': onBoxClick
+              ? {
+                  backgroundColor: bgColor.replace('0.08', '0.12'),
+                }
+              : undefined,
+          }}
+          onClick={onBoxClick}
+        />
+
+        <Box
+          sx={{
+            position: 'absolute',
+            left: -48,
+            top: 0,
+            bgcolor: badgeBgColor,
+            color: '#ffffff',
+            px: 0.8,
+            py: 0.3,
+            borderRadius: '3px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+            fontSize: '11px',
+            fontWeight: 700,
+            whiteSpace: 'nowrap',
+            pointerEvents: 'auto',
+            cursor: 'pointer',
+            zIndex: 11,
+            userSelect: 'none',
+            transition: 'all 150ms ease-out',
+            '&:hover': {
+              boxShadow: '0 2px 5px rgba(0,0,0,0.18)',
+              transform: 'translateY(-1px)',
+            },
+          }}
+          onClick={onBadgeClick}
+        >
+          [{badgeLabel}]
+        </Box>
+      </Box>
+    );
+  };
+
+  /*
+   * UNDO / REDO
+   */
+  const handleUndo = useCallback(() => {
+    annotationState.undo();
+  }, [annotationState]);
+
+  const handleRedo = useCallback(() => {
+    annotationState.redo();
+  }, [annotationState]);
+
+  const getSelectedSpanIndices = useCallback(
+    (pageNumber: number, selection: Selection): number[] => {
+      const pageContainer = pageRefs.current.get(pageNumber);
+      if (!pageContainer) {
+        return [];
+      }
+
+      const textLayer = pageContainer.querySelector(
+        '.pdf-text-layer',
+      ) as HTMLElement | null;
+      if (!textLayer || selection.rangeCount === 0) {
+        return [];
+      }
+
+      const range = selection.getRangeAt(0);
+      const selectionRects = Array.from(range.getClientRects());
+      if (!selectionRects.length) {
+        return [];
+      }
+
+      const spans = Array.from(
+        textLayer.querySelectorAll('span[data-span-index]'),
+      ) as HTMLElement[];
+
+      const selectedIndices = new Set<number>();
+      spans.forEach((span) => {
+        const spanIndex = Number(span.dataset.spanIndex);
+        if (Number.isNaN(spanIndex)) return;
+
+        const spanRects = Array.from(span.getClientRects());
+        for (const spanRect of spanRects) {
+          for (const selectionRect of selectionRects) {
+            const intersects =
+              spanRect.left < selectionRect.right &&
+              spanRect.right > selectionRect.left &&
+              spanRect.top < selectionRect.bottom &&
+              spanRect.bottom > selectionRect.top;
+
+            if (intersects) {
+              selectedIndices.add(spanIndex);
+              return;
+            }
+          }
+        }
+      });
+
+      return Array.from(selectedIndices).sort((a, b) => a - b);
+    },
+    [],
+  );
+
+  const getSelectionFromRange = useCallback(
+    (pageNumber: number, selection: Selection): SelectedParagraph | null => {
+      const pageContainer = pageRefs.current.get(pageNumber);
+      if (!pageContainer || selection.rangeCount === 0) {
+        return null;
+      }
+
+      const range = selection.getRangeAt(0);
+      const selectionRects = Array.from(range.getClientRects());
+      if (!selectionRects.length) {
+        return null;
+      }
+
+      const pageBounds = pageContainer.getBoundingClientRect();
+      const rects = selectionRects
+        .map((selectionRect) => ({
+          left: selectionRect.left - pageBounds.left,
+          top: selectionRect.top - pageBounds.top,
+          width: selectionRect.width,
+          height: selectionRect.height,
+        }))
+        .filter((rect) => rect.width > 0 && rect.height > 0);
+
+      if (!rects.length) {
+        return null;
+      }
+
+      const left = Math.min(...rects.map((rect) => rect.left));
+      const top = Math.min(...rects.map((rect) => rect.top));
+      const right = Math.max(
+        ...rects.map((rect) => rect.left + rect.width),
+      );
+      const bottom = Math.max(
+        ...rects.map((rect) => rect.top + rect.height),
+      );
+
+      const selectedSpanIndices = getSelectedSpanIndices(
+        pageNumber,
+        selection,
+      );
+      if (!selectedSpanIndices.length) {
+        return null;
+      }
+
+      const selectedText = selection.toString().trim();
+      if (!selectedText.length) {
+        return null;
+      }
+
+      return {
+        id: `selection-${Date.now()}`,
+        page: pageNumber,
+        text: selectedText,
+        rect: {
+          left,
+          top,
+          right,
+          bottom,
+          width: right - left,
+          height: bottom - top,
+        },
+        spanIndices: selectedSpanIndices,
+        startSpanIndex: Math.min(...selectedSpanIndices),
+        endSpanIndex: Math.max(...selectedSpanIndices),
+        selectionRects: rects,
+      } as SelectedParagraph;
+    },
+    [getSelectedSpanIndices],
+  );
+
+  const handleTextLayerMouseUp = useCallback(
+    (
+      event: React.MouseEvent<HTMLDivElement>,
+      pageNumber: number,
+    ) => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) {
+        return;
+      }
+
+      const paragraphSelection = getSelectionFromRange(
+        pageNumber,
+        selection,
+      );
+      if (!paragraphSelection) {
+        return;
+      }
+
+      setSelectedParagraph(paragraphSelection);
+      setSelectedAnnotationId(null);
+
+      const existingAnnotation = annotationState.userAnnotations.find(
+        (annotation) =>
+          annotation.page === pageNumber &&
+          annotation.startSpanIndex === paragraphSelection.startSpanIndex &&
+          annotation.endSpanIndex === paragraphSelection.endSpanIndex,
+      );
+
+      if (existingAnnotation) {
+        setSelectedAnnotationId(existingAnnotation.id);
+      }
+
+      const rects = Array.from(
+        selection.getRangeAt(0).getClientRects(),
+      );
+      if (!rects.length) {
+        return;
+      }
+
+      const lastRect = rects[rects.length - 1];
+      const virtualAnchor = document.createElement('div');
+      virtualAnchor.style.position = 'fixed';
+      virtualAnchor.style.top = `${lastRect.bottom}px`;
+      virtualAnchor.style.left = `${lastRect.left}px`;
+      virtualAnchor.style.width = `${lastRect.width}px`;
+      virtualAnchor.style.height = '0px';
+      virtualAnchor.style.pointerEvents = 'none';
+      virtualAnchor.style.visibility = 'hidden';
+      document.body.appendChild(virtualAnchor);
+
+      setToolbarAnchor(virtualAnchor);
+
+      const cleanup = () => {
+        if (virtualAnchor.parentNode) {
+          virtualAnchor.parentNode.removeChild(virtualAnchor);
+        }
+      };
+
+      (virtualAnchor as any).__cleanup = cleanup;
+    },
+    [annotationState.userAnnotations, getSelectionFromRange],
+  );
+
+  /*
+   * TOOLBAR ACTIONS
+   */
+  const handleToolbarAction = useCallback(
+    (
+      action: string,
+      paragraph: SelectedParagraph,
+    ) => {
+      if (action === 'clear') {
+        // Remove annotation if it exists
+        if (selectedAnnotationId) {
+          annotationState.removeAnnotation(selectedAnnotationId);
+          setSelectedAnnotationId(null);
+        }
+        setSelectedParagraph(null);
+        setToolbarAnchor(null);
+        // Clear browser selection
+        window.getSelection()?.removeAllRanges();
+      } else {
+        // Assign/change annotation type
+        const annotationType = action as any;
+
+        if (selectedAnnotationId) {
+          // Update existing annotation
+          annotationState.updateAnnotationType(
+            selectedAnnotationId,
+            annotationType,
+          );
+          // Clear selection and hide toolbar after update
+          setSelectedParagraph(null);
+          setToolbarAnchor(null);
+          window.getSelection()?.removeAllRanges();
+        } else {
+          // Create new annotation
+          const annotation = annotationState.addAnnotation(
+            paragraph.page,
+            paragraph.text,
+            annotationType,
+            {
+              left: paragraph.rect.left,
+              top: paragraph.rect.top,
+              width: paragraph.rect.width,
+              height: paragraph.rect.height,
+              right: paragraph.rect.right,
+              bottom: paragraph.rect.bottom,
+            },
+            paragraph.spanIndices,
+          );
+          setSelectedAnnotationId(annotation.id);
+          // Clear selection and hide toolbar after creation
+          setSelectedParagraph(null);
+          setToolbarAnchor(null);
+          window.getSelection()?.removeAllRanges();
+        }
+      }
+    },
+    [selectedAnnotationId, annotationState],
+  );
+
+  const handleToolbarClose = useCallback(() => {
+    if (toolbarAnchor && (toolbarAnchor as any).__cleanup) {
+      (toolbarAnchor as any).__cleanup();
+    }
+    setToolbarAnchor(null);
+  }, [toolbarAnchor]);
+
   return (
     <Box display="flex" flexDirection="column" gap={2}>
       {/* Toolbar */}
@@ -454,20 +908,38 @@ export default function PdfTagViewer({
           Viewer controls:
         </Typography>
 
-        <IconButton onClick={handleZoomIn} size="small">
+        <IconButton onClick={handleZoomIn} size="small" title="Zoom in">
           <ZoomInIcon />
         </IconButton>
 
-        <IconButton onClick={handleZoomOut} size="small">
+        <IconButton onClick={handleZoomOut} size="small" title="Zoom out">
           <ZoomOutIcon />
         </IconButton>
 
-        <IconButton onClick={handleReset} size="small">
+        <IconButton onClick={handleReset} size="small" title="Reset zoom">
           <RestoreIcon />
         </IconButton>
 
-        <IconButton onClick={handleFitWidth} size="small">
+        <IconButton onClick={handleFitWidth} size="small" title="Fit to width">
           <FitScreenIcon />
+        </IconButton>
+
+        <IconButton
+          onClick={handleUndo}
+          size="small"
+          disabled={!annotationState.canUndo()}
+          title="Undo"
+        >
+          <UndoIcon />
+        </IconButton>
+
+        <IconButton
+          onClick={handleRedo}
+          size="small"
+          disabled={!annotationState.canRedo()}
+          title="Redo"
+        >
+          <RedoIcon />
         </IconButton>
 
         <Typography variant="body2" ml={2}>
@@ -543,13 +1015,6 @@ export default function PdfTagViewer({
                 return (
                   <Box
                     key={pageNumber}
-                    ref={(element: HTMLDivElement | null) => {
-                      if (element) {
-                        pageRefs.current.set(pageNumber, element);
-                      } else {
-                        pageRefs.current.delete(pageNumber);
-                      }
-                    }}
                     sx={{
                       position: 'relative',
                       mb: 3,
@@ -557,7 +1022,15 @@ export default function PdfTagViewer({
                       justifyContent: 'center',
                     }}
                   >
-                    <Box sx={{ position: 'relative' }}>
+                    <Box sx={{ position: 'relative' }} 
+                      ref={(element: HTMLDivElement | null) => {
+                      if (element) {
+                        pageRefs.current.set(pageNumber, element);
+                      } else {
+                        pageRefs.current.delete(pageNumber);
+                      }
+                      }}
+                    >
                       <canvas
                         ref={(canvas) => {
                           if (canvas) {
@@ -578,72 +1051,106 @@ export default function PdfTagViewer({
                           border: '1px solid #e0e0e0',
                           borderRadius: 4,
                           backgroundColor: '#fff',
+                          pointerEvents: 'none',
                         }}
                       />
 
                       {viewport ? (
-                        <Box
-                          sx={{
-                            position: 'absolute',
-                            inset: 0,
-                            pointerEvents: 'none',
-                          }}
-                        >
+                        <>
+                          <Box
+                            className="pdf-text-layer textLayer"
+                            onMouseUp={(e) =>
+                              handleTextLayerMouseUp(e, pageNumber)
+                            }
+                            sx={{
+                              position: 'absolute',
+                              inset: 0,
+                              pointerEvents: 'auto',
+                              userSelect: 'text',
+                              WebkitUserSelect: 'text',
+                              MozUserSelect: 'text',
+                            }}
+                          />
+
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              inset: 0,
+                              pointerEvents: 'none',
+                            }}
+                          >
+                          {/* Highlight overlays render only from browser text selection, not custom overlays */}
+
+
                           {pageRects
-                            .filter(
-                              (rect) =>
-                                rect.page === pageNumber,
-                            )
-                            .map((rect) => (
-                              <>
-                              <Box
-                                key={rect.id}
-                                sx={{
-                                  position: 'absolute',
-                                  left: rect.left - 2,
-                                  top: rect.top ,
-                                  width: rect.width + 4,
-                                  height: rect.height + 4,
-                                  backgroundColor: rect.type.includes('section') ?'rgba(79, 255, 91, 0.28)':
-                                    'rgba(255, 213, 79, 0.28)',
-                                  border:rect.type.includes('section') ?'1px solid rgba(7, 255, 69, 0.8)':
-                                    '1px solid rgba(255, 193, 7, 0.8)',
-                                  borderRadius: 2,
-                                  boxSizing: 'border-box',
-                                  pointerEvents: 'none',
-                                }}
-                              />
-                              <Box
-                                key={`badge-${rect.id}`}
-                                onClick={() => scrollToTag(rect)}
-                                sx={{
-                                  position: 'absolute',
-                                  left: Math.max(8, rect.left - 40),
-                                  top: rect.top - 4,
-                                  bgcolor: rect.type.includes('section') ?'rgb(5, 137, 14)':
-                                    'rgb(159, 120, 12)',
-                                  color: '#ffffff',
-                                  px: 1.25,
-                                  py: 0.4,
-                                  borderRadius: '999px',
-                                  boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-                                  textTransform: 'uppercase',
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  border:rect.type.includes('section') ?'1px solid rgba(7, 255, 69, 0.8)':
-                                    '1px solid rgba(255, 193, 7, 0.8)',
-                                  whiteSpace: 'nowrap',
-                                  pointerEvents: 'auto',
-                                  cursor: 'pointer',
-                                  zIndex: 10,
-                                  userSelect: 'none',
-                                }}
-                              >
-                                {rect.type[0]}
-                              </Box>
-                              </>
-                            ))}
+                            .filter((rect) => rect.page === pageNumber)
+                            .map((rect) =>
+                              renderAnnotationOverlay(
+                                `predefined-${rect.id}`,
+                                rect.left - 2,
+                                rect.top,
+                                rect.width + 4,
+                                rect.height + 4,
+                                rect.type,
+                                getBadgeLabel(rect.type),
+                                () => scrollToTag(rect),
+                              ),
+                            )}
+
+
+
+                          {annotationState.userAnnotations
+                            .filter((a) => a.page === pageNumber)
+                            .map((annotation) => {
+                              const handleAnnotationSelect = (event: any) => {
+                                if (event?.stopPropagation) {
+                                  event.stopPropagation();
+                                }
+
+                                setSelectedAnnotationId(annotation.id);
+                                setSelectedParagraph({
+                                  id: annotation.id,
+                                  page: annotation.page,
+                                  text: annotation.text,
+                                  rect: annotation.rect,
+                                });
+
+                                const rect = annotation.rect;
+                                if (rect) {
+                                  const virtualAnchor = document.createElement('div');
+                                  virtualAnchor.style.position = 'fixed';
+                                  virtualAnchor.style.top = `${rect.top + rect.height}px`;
+                                  virtualAnchor.style.left = `${rect.left}px`;
+                                  virtualAnchor.style.width = `${rect.width}px`;
+                                  virtualAnchor.style.height = '0px';
+                                  virtualAnchor.style.pointerEvents = 'none';
+                                  virtualAnchor.style.visibility = 'hidden';
+                                  document.body.appendChild(virtualAnchor);
+                                  setToolbarAnchor(virtualAnchor);
+                                  (virtualAnchor as any).__cleanup = () => {
+                                    if (virtualAnchor.parentNode) {
+                                      virtualAnchor.parentNode.removeChild(virtualAnchor);
+                                    }
+                                  };
+                                }
+                              };
+
+                              return renderAnnotationOverlay(
+                                annotation.id,
+                                annotation.rect.left,
+                                annotation.rect.top,
+                                annotation.rect.width,
+                                annotation.rect.height,
+                                annotation.type,
+                                getBadgeLabel(annotation.type),
+                                handleAnnotationSelect,
+                                handleAnnotationSelect,
+                              );
+                            })}
+
+
                         </Box>
+                        </>
                       ) : null}
                     </Box>
                   </Box>
@@ -652,7 +1159,30 @@ export default function PdfTagViewer({
             )}
           </Box>
         </Paper>
+
+        {/* Annotation Panel */}
+        <AnnotationPanel
+          userAnnotations={annotationState.userAnnotations}
+          predefinedAnnotations={annotations}
+        />
       </Box>
+
+      {/* Paragraph Toolbar */}
+      {selectedParagraph && (
+        <ParagraphToolbar
+          selectedParagraph={selectedParagraph}
+          anchorElement={toolbarAnchor}
+          onAction={handleToolbarAction}
+          onClose={handleToolbarClose}
+          existingType={
+            selectedAnnotationId
+              ? annotationState.userAnnotations.find(
+                  (a) => a.id === selectedAnnotationId,
+                )?.type
+              : undefined
+          }
+        />
+      )}
     </Box>
   );
 }

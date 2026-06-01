@@ -1,4 +1,5 @@
 import { buildAnnotationsFromInputs, findPhraseBounds, normalizeText, sanitizeAnnotations } from '../utils/pdfAnnotations';
+import { describe, test, expect } from 'vitest';
 
 describe('pdfAnnotations utilities', () => {
   test('normalizeText collapses spaces and lowercases', () => {
