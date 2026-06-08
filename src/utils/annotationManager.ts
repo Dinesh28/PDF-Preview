@@ -1,4 +1,6 @@
 import {
+  AnnotationRect,
+  PersistedAnnotation,
   UserAnnotation,
   PdfAnnotationType,
   HistoryEntry,
@@ -13,8 +15,10 @@ export function createAnnotation(
   page: number,
   text: string,
   type: PdfAnnotationType,
-  rect: UserAnnotation['rect'],
+  rect: AnnotationRect,
   spanIndices?: number[],
+  metadata?: Record<string, unknown>,
+  rects: AnnotationRect[] = [rect],
 ): UserAnnotation {
   const now = Date.now();
   return {
@@ -23,11 +27,49 @@ export function createAnnotation(
     text,
     type,
     rect,
+    rects,
+    metadata,
     startSpanIndex: spanIndices?.[0],
     endSpanIndex: spanIndices?.[spanIndices.length - 1],
     createdAt: now,
     updatedAt: now,
   };
+}
+
+export function toPersistedAnnotation(
+  annotation: UserAnnotation,
+): PersistedAnnotation {
+  const persisted: PersistedAnnotation = {
+    id: annotation.id,
+    page: annotation.page,
+    text: annotation.text,
+    type: annotation.type,
+  };
+
+  if (annotation.metadata) {
+    persisted.metadata = annotation.metadata;
+  }
+
+  return persisted;
+}
+
+export function fromPersistedAnnotation(
+  annotation: PersistedAnnotation,
+  rect: AnnotationRect,
+  spanIndices?: number[],
+  fallbackId?: string,
+  rects?: AnnotationRect[],
+): UserAnnotation {
+  return createAnnotation(
+    annotation.id ?? fallbackId ?? generateAnnotationId(),
+    annotation.page,
+    annotation.text,
+    annotation.type,
+    rect,
+    spanIndices,
+    annotation.metadata,
+    rects,
+  );
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   DetectedTag,
   PageMatchRect,
   PdfAnnotation,
+  PdfAnnotationType,
   SelectedParagraph,
   TextItemWithIndex,
   UserAnnotation,
@@ -28,6 +29,7 @@ import {
 
 import { findPhraseBounds } from '../utils/pdfAnnotations';
 import { useAnnotationState } from '../hooks/useAnnotationState';
+import { fromPersistedAnnotation } from '../utils/annotationManager';
 import ParagraphToolbar from './ParagraphToolbar';
 import AnnotationPanel from './AnnotationPanel';
 
@@ -135,6 +137,7 @@ export default function PdfTagViewer({
     useState<Record<number, TextItemWithIndex[]>>({});
 
   const annotationState = useAnnotationState();
+  const setAnnotations = annotationState.setAnnotations;
 
   const viewerRef = useRef<HTMLDivElement | null>(null);
 
@@ -149,6 +152,7 @@ export default function PdfTagViewer({
     useRef<Map<number, pdfjsLib.PageViewport>>(new Map());
 
   const textLayerRefs = useRef<Map<number, any>>(new Map());
+  const loadedAnnotationKeyRef = useRef<string>('');
 
   const pages = useMemo(
     () => Array.from({ length: pageCount }, (_, i) => i + 1),
@@ -338,6 +342,7 @@ export default function PdfTagViewer({
   const detectDocument = useCallback(
     async (doc: pdfjsLib.PDFDocumentProxy) => {
       const matches: DetectedTag[] = [];
+      const reconstructedAnnotations: UserAnnotation[] = [];
 
       for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
         const page = await doc.getPage(pageNumber);
@@ -367,14 +372,22 @@ export default function PdfTagViewer({
         }
 
         for (const annotation of annotations) {
+          if (annotation.page !== pageNumber) {
+            continue;
+          }
+
           const phraseMatches = findPhraseBounds(
             annotation.text,
             items,
           );
 
           for (const match of phraseMatches) {
+            const matchId =
+              annotation.id ??
+              `${annotation.type}-${pageNumber}-${match.startSpanIndex}-${match.endSpanIndex}`;
+
             matches.push({
-              id: `${annotation.type}-${pageNumber}-${match.startSpanIndex}-${match.endSpanIndex}`,
+              id: matchId,
 
               page: pageNumber,
 
@@ -386,13 +399,53 @@ export default function PdfTagViewer({
 
               endSpanIndex: match.endSpanIndex,
             });
+
+            const matchRect = computeMatchRect(
+              viewport,
+              items,
+              match.startSpanIndex,
+              match.endSpanIndex,
+              matchId,
+              annotation.type,
+              annotation.text,
+              pageNumber,
+            );
+
+            if (matchRect) {
+              reconstructedAnnotations.push(
+                fromPersistedAnnotation(
+                  annotation,
+                  {
+                    left: matchRect.left - 2,
+                    top: matchRect.top,
+                    width: matchRect.width + 4,
+                    height: matchRect.height + 4,
+                  },
+                  Array.from(
+                    { length: match.endSpanIndex - match.startSpanIndex + 1 },
+                    (_, index) => match.startSpanIndex + index,
+                  ),
+                  matchId,
+                ),
+              );
+            }
           }
         }
       }
 
       setDetectedTags(matches);
+      const annotationKey = JSON.stringify({
+        fileUrl,
+        annotations,
+        scale
+      });
+
+      if (loadedAnnotationKeyRef.current !== annotationKey) {
+        loadedAnnotationKeyRef.current = annotationKey;
+        setAnnotations(reconstructedAnnotations);
+      }
     },
-    [annotations, scale],
+    [annotations, fileUrl, scale, setAnnotations],
   );
 
   /*
@@ -524,32 +577,56 @@ export default function PdfTagViewer({
   const getAnnotationStyles = (type: PdfAnnotationType) => {
     if (type === 'section') {
       return {
-        bgColor: 'rgba(34, 139, 34, 0.08)',
-        borderColor: 'rgba(34, 139, 34, 0.4)',
-        badgeBgColor: '#228b22',
+        bgColor: 'rgba(47, 128, 237, 0.08)',
+        borderColor: 'rgba(47, 128, 237, 0.45)',
+        badgeBgColor: '#2f80ed',
       };
     }
 
     if (type === 'sub-section') {
       return {
-        bgColor: 'rgba(0, 120, 212, 0.08)',
-        borderColor: 'rgba(0, 120, 212, 0.4)',
-        badgeBgColor: '#0078d4',
+        bgColor: 'rgba(47, 128, 237, 0.08)',
+        borderColor: 'rgba(47, 128, 237, 0.45)',
+        badgeBgColor: '#2f80ed',
       };
     }
 
     if (type === 'question') {
       return {
-        bgColor: 'rgba(255, 140, 0, 0.08)',
-        borderColor: 'rgba(255, 140, 0, 0.4)',
-        badgeBgColor: '#ff8c00',
+        bgColor: 'rgba(39, 174, 96, 0.08)',
+        borderColor: 'rgba(39, 174, 96, 0.45)',
+        badgeBgColor: '#27ae60',
+      };
+    }
+
+    if (type === 'sub-question') {
+      return {
+        bgColor: 'rgba(39, 174, 96, 0.08)',
+        borderColor: 'rgba(39, 174, 96, 0.45)',
+        badgeBgColor: '#27ae60',
+      };
+    }
+
+    if (type === 'answer') {
+      return {
+        bgColor: 'rgba(187, 44, 237, 0.08)',
+        borderColor: 'rgba(187, 44, 237, 0.45)',
+        badgeBgColor: '#bb2ced',
+      };
+    }
+
+    if (type === 'description') {
+      return {
+        bgColor: 'rgba(255, 107, 58, 0.08)',
+        borderColor: 'rgba(255, 107, 58, 0.45)',
+        badgeBgColor: '#ff6b3a',
       };
     }
 
     return {
-      bgColor: 'rgba(155, 89, 182, 0.08)',
-      borderColor: 'rgba(155, 89, 182, 0.4)',
-      badgeBgColor: '#9b59b6',
+      bgColor: 'rgba(107, 114, 128, 0.08)',
+      borderColor: 'rgba(107, 114, 128, 0.45)',
+      badgeBgColor: '#6b7280',
     };
   };
 
@@ -560,7 +637,13 @@ export default function PdfTagViewer({
       ? 'SS'
       : type === 'question'
       ? 'Q'
-      : 'SQ';
+      : type === 'sub-question'
+      ? 'SQ'
+      : type === 'answer'
+      ? 'A'
+      : type === 'description'
+      ? 'D'
+      : 'I';
 
   const renderAnnotationOverlay = (
     key: string,
@@ -578,6 +661,7 @@ export default function PdfTagViewer({
     return (
       <Box
         key={key}
+        data-pdf-annotation="true"
         sx={{
           position: 'absolute',
           left,
@@ -881,6 +965,7 @@ export default function PdfTagViewer({
               bottom: paragraph.rect.bottom,
             },
             paragraph.spanIndices,
+            paragraph.selectionRects,
           );
           setSelectedAnnotationId(annotation.id);
           // Clear selection and hide toolbar after creation
@@ -897,8 +982,47 @@ export default function PdfTagViewer({
     if (toolbarAnchor && (toolbarAnchor as any).__cleanup) {
       (toolbarAnchor as any).__cleanup();
     }
+    setSelectedParagraph(null);
+    setSelectedAnnotationId(null);
     setToolbarAnchor(null);
   }, [toolbarAnchor]);
+
+  useEffect(() => {
+    return () => {
+      if (toolbarAnchor && (toolbarAnchor as any).__cleanup) {
+        (toolbarAnchor as any).__cleanup();
+      }
+    };
+  }, [toolbarAnchor]);
+
+  useEffect(() => {
+    if (!toolbarAnchor && !selectedParagraph) {
+      return undefined;
+    }
+
+    const handleDocumentMouseDown = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) {
+        return;
+      }
+
+      if (
+        target.closest('[data-pdf-annotation-toolbar="true"]') ||
+        target.closest('[data-pdf-annotation="true"]')
+      ) {
+        return;
+      }
+
+      handleToolbarClose();
+      window.getSelection()?.removeAllRanges();
+    };
+
+    document.addEventListener('mousedown', handleDocumentMouseDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handleDocumentMouseDown);
+    };
+  }, [handleToolbarClose, selectedParagraph, toolbarAnchor]);
 
   return (
     <Box display="flex" flexDirection="column" gap={2}>
@@ -1055,8 +1179,8 @@ export default function PdfTagViewer({
                         }}
                       />
 
-                      {viewport ? (
-                        <>
+                      {/* {viewport ? ( */}
+                        <Box sx={{ position: 'absolute', inset: 0 }}>
                           <Box
                             className="pdf-text-layer textLayer"
                             onMouseUp={(e) =>
@@ -1082,23 +1206,6 @@ export default function PdfTagViewer({
                           {/* Highlight overlays render only from browser text selection, not custom overlays */}
 
 
-                          {pageRects
-                            .filter((rect) => rect.page === pageNumber)
-                            .map((rect) =>
-                              renderAnnotationOverlay(
-                                `predefined-${rect.id}`,
-                                rect.left - 2,
-                                rect.top,
-                                rect.width + 4,
-                                rect.height + 4,
-                                rect.type,
-                                getBadgeLabel(rect.type),
-                                () => scrollToTag(rect),
-                              ),
-                            )}
-
-
-
                           {annotationState.userAnnotations
                             .filter((a) => a.page === pageNumber)
                             .map((annotation) => {
@@ -1115,11 +1222,13 @@ export default function PdfTagViewer({
                                   rect: annotation.rect,
                                 });
 
-                                const rect = annotation.rect;
+                                const targetRect =
+                                  event?.currentTarget?.getBoundingClientRect?.();
+                                const rect = targetRect ?? annotation.rect;
                                 if (rect) {
                                   const virtualAnchor = document.createElement('div');
                                   virtualAnchor.style.position = 'fixed';
-                                  virtualAnchor.style.top = `${rect.top + rect.height}px`;
+                                  virtualAnchor.style.top = `${rect.bottom ?? rect.top + rect.height}px`;
                                   virtualAnchor.style.left = `${rect.left}px`;
                                   virtualAnchor.style.width = `${rect.width}px`;
                                   virtualAnchor.style.height = '0px';
@@ -1150,8 +1259,8 @@ export default function PdfTagViewer({
 
 
                         </Box>
-                        </>
-                      ) : null}
+                        </Box>
+                      {/* ) : null} */}
                     </Box>
                   </Box>
                 );

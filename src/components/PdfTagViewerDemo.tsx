@@ -6,8 +6,9 @@ const sampleFileUrl = 'https://mozilla.github.io/pdf.js/web/compressed.tracemonk
 
 const sampleAnnotations: PdfAnnotation[] = [
   { page: 1, text: '1. introduction', type: 'section' },
-  { page: 1, text: 'annotation', type: 'question' },
-  { page: 1, text: 'PDF.js', type: 'sub-section' },
+  { page: 1, text:  "Trace-based Just-in-Time Type Specialization for Dynamic Languages",
+      "type": "section" },
+  { page: 1, text: '"Dynamic languages such as JavaScript are more difficult to com-\npile than statically typed ones. Since no concrete type information\nis available, traditional compilers need to emit generic code that can\nhandle all possible type combinations at runtime.",', type: 'section' },
 ];
 
 export default function PdfTagViewerDemo() {

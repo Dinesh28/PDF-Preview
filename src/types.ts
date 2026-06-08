@@ -1,38 +1,54 @@
-export type PdfAnnotationType = 'section' | 'sub-section' | 'question' | 'sub-question';
+export type PdfAnnotationType =
+  | 'section'
+  | 'sub-section'
+  | 'question'
+  | 'sub-question'
+  | 'answer'
+  | 'description'
+  | 'instruction';
 
-export type PdfAnnotation = {
+export type PersistedAnnotation = {
+  id?: string;
   page: number;
   text: string;
   type: PdfAnnotationType;
-  id?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type PdfAnnotation = PersistedAnnotation;
+
+export type AnnotationRect = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  right?: number;
+  bottom?: number;
 };
 
 /**
- * User-created annotation with full tracking info
+ * Internal rendering annotation with geometry used only by the viewer.
  */
-export type UserAnnotation = {
+export type InternalAnnotation = {
   id: string;
   page: number;
   text: string;
   type: PdfAnnotationType;
-  rect: {
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-    right?: number;
-    bottom?: number;
-  };
+  rect: AnnotationRect;
+  rects: AnnotationRect[];
+  metadata?: Record<string, unknown>;
   startSpanIndex?: number;
   endSpanIndex?: number;
   createdAt: number;
   updatedAt: number;
 };
 
+export type UserAnnotation = InternalAnnotation;
+
 /**
  * Combined annotation (predefined + user)
  */
-export type CombinedAnnotation = PdfAnnotation | UserAnnotation;
+export type CombinedAnnotation = InternalAnnotation;
 
 export interface TextItemWithIndex {
   str: string;
@@ -121,5 +137,5 @@ export type HistoryEntry = {
  */
 export type AnnotationState = {
   predefined: PdfAnnotation[];
-  userAnnotations: UserAnnotation[];
+  userAnnotations: PersistedAnnotation[];
 };

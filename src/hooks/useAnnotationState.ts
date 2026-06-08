@@ -10,6 +10,7 @@ import {
   createAnnotation,
   generateAnnotationId,
   removeAnnotation,
+  toPersistedAnnotation,
   updateAnnotation,
 } from '../utils/annotationManager';
 
@@ -28,6 +29,7 @@ export function useAnnotationState(initialAnnotations: UserAnnotation[] = []) {
       type: PdfAnnotationType,
       rect: UserAnnotation['rect'],
       spanIndices?: number[],
+      rects?: UserAnnotation['rects'],
     ): UserAnnotation => {
       const id = generateAnnotationId();
       const annotation = createAnnotation(
@@ -37,6 +39,8 @@ export function useAnnotationState(initialAnnotations: UserAnnotation[] = []) {
         type,
         rect,
         spanIndices,
+        undefined,
+        rects,
       );
 
       setUserAnnotations((prev) => [...prev, annotation]);
@@ -159,23 +163,34 @@ export function useAnnotationState(initialAnnotations: UserAnnotation[] = []) {
     historyRef.current.clear();
   }, []);
 
+  const setAnnotations = useCallback(
+    (annotations: UserAnnotation[], resetHistory = true): void => {
+      setUserAnnotations(annotations);
+      if (resetHistory) {
+        historyRef.current.clear();
+      }
+    },
+    [],
+  );
+
   const exportState = useCallback(
     (predefined: any[]): AnnotationState => {
       return {
         predefined,
-        userAnnotations,
+        userAnnotations: userAnnotations.map(toPersistedAnnotation),
       };
     },
     [userAnnotations],
   );
 
   const importState = useCallback((state: AnnotationState): void => {
-    setUserAnnotations(state.userAnnotations);
+    setUserAnnotations([]);
     historyRef.current.clear();
   }, []);
 
   return {
     userAnnotations,
+    setAnnotations,
     addAnnotation,
     updateAnnotationType,
     removeAnnotation: removeAnnotationById,

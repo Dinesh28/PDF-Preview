@@ -13,7 +13,10 @@ import {
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import DownloadIcon from '@mui/icons-material/Download';
 import { UserAnnotation, PdfAnnotation } from '../types';
-import { exportAnnotationsAsJSON } from '../utils/annotationManager';
+import {
+  exportAnnotationsAsJSON,
+  toPersistedAnnotation,
+} from '../utils/annotationManager';
 
 type AnnotationPanelProps = {
   userAnnotations: UserAnnotation[];
@@ -29,8 +32,8 @@ export default function AnnotationPanel({
   const [copied, setCopied] = useState(false);
 
   const annotationState = {
-    predefined: predefinedAnnotations,
-    userAnnotations,
+    predefined: [],
+    userAnnotations: userAnnotations.map(toPersistedAnnotation),
   };
 
   const jsonExport = exportAnnotationsAsJSON(annotationState);

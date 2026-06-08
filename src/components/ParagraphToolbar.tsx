@@ -2,15 +2,19 @@ import React, { useState } from 'react';
 import {
   Box,
   Button,
-  Menu,
-  MenuItem,
-  Popper,
-  Paper,
   Divider,
   IconButton,
+  Menu,
+  MenuItem,
+  Paper,
+  Popper,
+  Tooltip,
 } from '@mui/material';
-import ClearIcon from '@mui/icons-material/Clear';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
+import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
 import { SelectedParagraph, PdfAnnotationType } from '../types';
 
@@ -24,12 +28,111 @@ type ParagraphToolbarProps = {
   existingType?: PdfAnnotationType;
 };
 
-const ANNOTATION_TYPES: Array<{ value: PdfAnnotationType; label: string }> = [
-  { value: 'section', label: 'Section' },
-  { value: 'sub-section', label: 'Sub-Section' },
-  { value: 'question', label: 'Question' },
-  { value: 'sub-question', label: 'Sub-Question' },
+type AnnotationCommand = {
+  value: PdfAnnotationType;
+  label: string;
+  badge: string;
+  color: string;
+};
+
+type CommandGroup = {
+  id: string;
+  label: string;
+  badge: string;
+  color: string;
+  options: AnnotationCommand[];
+};
+
+const COMMAND_GROUPS: CommandGroup[] = [
+  {
+    id: 'section',
+    label: 'Section',
+    badge: 'S',
+    color: '#2f80ed',
+    options: [
+      { value: 'section', label: 'Section', badge: 'S', color: '#2f80ed' },
+      {
+        value: 'sub-section',
+        label: 'Sub Section',
+        badge: 'SS',
+        color: '#2f80ed',
+      },
+    ],
+  },
+  {
+    id: 'question',
+    label: 'Question',
+    badge: 'Q',
+    color: '#27ae60',
+    options: [
+      { value: 'question', label: 'Question', badge: 'Q', color: '#27ae60' },
+      {
+        value: 'sub-question',
+        label: 'Sub Question',
+        badge: 'SQ',
+        color: '#27ae60',
+      },
+    ],
+  },
+  {
+    id: 'answer',
+    label: 'Answer Type',
+    badge: 'A',
+    color: '#bb2ced',
+    options: [
+      { value: 'answer', label: 'Answer', badge: 'A', color: '#bb2ced' },
+    ],
+  },
 ];
+
+const DESCRIPTION_COMMAND: AnnotationCommand = {
+  value: 'description',
+  label: 'Description',
+  badge: 'D',
+  color: '#ff6b3a',
+};
+
+function getCommandForType(type?: PdfAnnotationType) {
+  if (!type) return undefined;
+
+  if (type === DESCRIPTION_COMMAND.value) {
+    return DESCRIPTION_COMMAND;
+  }
+
+  return COMMAND_GROUPS.flatMap((group) => group.options).find(
+    (option) => option.value === type,
+  );
+}
+
+function TypeBadge({
+  badge,
+  color,
+}: {
+  badge: string;
+  color: string;
+}) {
+  return (
+    <Box
+      component="span"
+      sx={{
+        width: 16,
+        height: 16,
+        borderRadius: '4px',
+        border: `1.5px solid ${color}`,
+        color,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '10px !important',
+        fontWeight: 700,
+        lineHeight: 1,
+        flex: '0 0 auto',
+      }}
+    >
+      {badge}
+    </Box>
+  );
+}
 
 export default function ParagraphToolbar({
   selectedParagraph,
@@ -38,28 +141,32 @@ export default function ParagraphToolbar({
   onClose,
   existingType,
 }: ParagraphToolbarProps) {
-  const [typeMenuAnchor, setTypeMenuAnchor] =
-    useState<HTMLElement | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
   if (!selectedParagraph || !anchorElement) {
     return null;
   }
 
   const open = Boolean(anchorElement);
+  const selectedCommand = getCommandForType(existingType);
 
-  const handleTypeMenuOpen = (
+  const handleMenuOpen = (
     event: React.MouseEvent<HTMLButtonElement>,
+    groupId: string,
   ) => {
-    setTypeMenuAnchor(event.currentTarget);
+    setMenuAnchor(event.currentTarget);
+    setActiveGroupId(groupId);
   };
 
-  const handleTypeMenuClose = () => {
-    setTypeMenuAnchor(null);
+  const handleMenuClose = () => {
+    setMenuAnchor(null);
+    setActiveGroupId(null);
   };
 
   const handleTypeSelect = (type: PdfAnnotationType) => {
     onAction(type, selectedParagraph);
-    handleTypeMenuClose();
+    handleMenuClose();
   };
 
   const handleClear = () => {
@@ -67,9 +174,9 @@ export default function ParagraphToolbar({
     onClose();
   };
 
-  const currentTypeLabel =
-    existingType &&
-    ANNOTATION_TYPES.find((t) => t.value === existingType)?.label;
+  const activeGroup = COMMAND_GROUPS.find(
+    (group) => group.id === activeGroupId,
+  );
 
   return (
     <Popper
@@ -91,69 +198,252 @@ export default function ParagraphToolbar({
         },
       ]}
       disablePortal={false}
+      sx={{ zIndex: 1300 }}
     >
-      <Paper
-        elevation={8}
+      <Box
+        data-pdf-annotation-toolbar="true"
         sx={{
-          p: 1,
           display: 'flex',
-          alignItems: 'center',
-          gap: 1,
-          backgroundColor: '#fff',
-          border: '1px solid #e0e0e0',
-          borderRadius: 1,
-          zIndex: 1300,
+          flexDirection: 'column',
+          alignItems: 'flex-start',
+          gap: 0.5,
         }}
       >
-        {/* Type Selection Button */}
-        <Button
-          variant="outlined"
-          size="small"
-          endIcon={<ExpandMoreIcon sx={{ fontSize: 16 }} />}
-          onClick={handleTypeMenuOpen}
+        <Paper
+          elevation={6}
           sx={{
-            fontSize: 12,
-            py: 0.5,
-            px: 1,
-            textTransform: 'none',
-            minWidth: 100,
+            height: 32,
+            px: 0.75,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0.25,
+            backgroundColor: '#fff',
+            border: '1px solid #2f80ed',
+            borderRadius: '6px',
+            boxShadow: '0 4px 12px rgba(47, 128, 237, 0.18)',
+            overflow: 'hidden',
           }}
         >
-          {currentTypeLabel || 'Assign Type'}
-        </Button>
+          {COMMAND_GROUPS.map((group, index) => {
+            const groupSelected = group.options.some(
+              (option) => option.value === existingType,
+            );
+            const displayCommand = groupSelected ? selectedCommand : group;
 
-        {/* Type Menu */}
-        <Menu
-          anchorEl={typeMenuAnchor}
-          open={Boolean(typeMenuAnchor)}
-          onClose={handleTypeMenuClose}
+            return (
+              <React.Fragment key={group.id}>
+                {index > 0 ? (
+                  <Divider orientation="vertical" flexItem sx={{ mx: 0.25 }} />
+                ) : null}
+                <Button
+                  size="small"
+                  endIcon={<ExpandMoreIcon sx={{ fontSize: 15 }} />}
+                  onClick={(event) => handleMenuOpen(event, group.id)}
+                  sx={{
+                    height: 26,
+                    px: 0.65,
+                    minWidth: 0,
+                    borderRadius: '5px',
+                    color: '#111827',
+                    backgroundColor: groupSelected
+                      ? `${group.color}12`
+                      : 'transparent',
+                    border: groupSelected
+                      ? `1px solid ${group.color}`
+                      : '1px solid transparent',
+                    fontSize: 11,
+                    fontWeight: 500,
+                    textTransform: 'none',
+                    gap: 0.5,
+                    '& .MuiButton-startIcon': {
+                      mr: 0.25,
+                    },
+                    '& .MuiButton-endIcon': {
+                      ml: 0.25,
+                    },
+                    '&:hover': {
+                      backgroundColor: `${group.color}12`,
+                    },
+                  }}
+                  startIcon={
+                    <TypeBadge
+                      badge={displayCommand?.badge ?? group.badge}
+                      color={displayCommand?.color ?? group.color}
+                    />
+                  }
+                >
+                  {displayCommand?.label ?? group.label}
+                </Button>
+              </React.Fragment>
+            );
+          })}
+
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.25 }} />
+
+          <Button
+            size="small"
+            endIcon={<ExpandMoreIcon sx={{ fontSize: 15 }} />}
+            onClick={() => handleTypeSelect(DESCRIPTION_COMMAND.value)}
+            sx={{
+              height: 26,
+              px: 0.65,
+              minWidth: 0,
+              borderRadius: '5px',
+              color: '#111827',
+              backgroundColor:
+                existingType === DESCRIPTION_COMMAND.value
+                  ? `${DESCRIPTION_COMMAND.color}12`
+                  : 'transparent',
+              border:
+                existingType === DESCRIPTION_COMMAND.value
+                  ? `1px solid ${DESCRIPTION_COMMAND.color}`
+                  : '1px solid transparent',
+              fontSize: 11,
+              fontWeight: 500,
+              textTransform: 'none',
+              '& .MuiButton-startIcon': {
+                mr: 0.25,
+              },
+              '& .MuiButton-endIcon': {
+                display: 'none',
+              },
+              '&:hover': {
+                backgroundColor: `${DESCRIPTION_COMMAND.color}12`,
+              },
+            }}
+            startIcon={
+              <TypeBadge
+                badge={DESCRIPTION_COMMAND.badge}
+                color={DESCRIPTION_COMMAND.color}
+              />
+            }
+          >
+            {DESCRIPTION_COMMAND.label}
+          </Button>
+
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.25 }} />
+
+          <Tooltip title="Open details">
+            <IconButton
+              size="small"
+              sx={{
+                width: 24,
+                height: 24,
+                borderRadius: '5px',
+                color: '#4b5563',
+              }}
+            >
+              <OpenInNewIcon sx={{ fontSize: 15 }} />
+            </IconButton>
+          </Tooltip>
+
+          <Tooltip title="More actions">
+            <IconButton
+              size="small"
+              sx={{
+                width: 24,
+                height: 24,
+                borderRadius: '5px',
+                color: '#4b5563',
+              }}
+            >
+              <MoreVertIcon sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Tooltip>
+        </Paper>
+
+        <Paper
+          elevation={6}
+          sx={{
+            height: 29,
+            display: 'flex',
+            alignItems: 'center',
+            backgroundColor: '#fff',
+            border: '1px solid #2f80ed',
+            borderRadius: '6px',
+            boxShadow: '0 4px 12px rgba(47, 128, 237, 0.14)',
+            overflow: 'hidden',
+          }}
         >
-          {ANNOTATION_TYPES.map((type) => (
+          <Button
+            size="small"
+            startIcon={<AutoFixHighIcon sx={{ fontSize: 16 }} />}
+            sx={{
+              height: 29,
+              px: 0.9,
+              borderRadius: 0,
+              color: '#0875f5',
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: 'none',
+              whiteSpace: 'nowrap',
+              '& .MuiButton-startIcon': {
+                mr: 0.35,
+              },
+            }}
+          >
+            Auto-Identify
+          </Button>
+
+          <Divider orientation="vertical" flexItem />
+
+          <Button
+            size="small"
+            startIcon={<CloseIcon sx={{ fontSize: 15 }} />}
+            onClick={handleClear}
+            sx={{
+              height: 29,
+              px: 0.8,
+              borderRadius: 0,
+              color: '#9ca3af',
+              fontSize: 11,
+              fontWeight: 600,
+              textTransform: 'none',
+              whiteSpace: 'nowrap',
+              '& .MuiButton-startIcon': {
+                mr: 0.25,
+              },
+              '&:hover': {
+                color: '#ef4444',
+                backgroundColor: '#fee2e2',
+              },
+            }}
+          >
+            Clear
+          </Button>
+        </Paper>
+
+        <Menu
+          anchorEl={menuAnchor}
+          open={Boolean(menuAnchor)}
+          onClose={handleMenuClose}
+          PaperProps={{
+            'data-pdf-annotation-toolbar': 'true',
+            sx: {
+              mt: 0.5,
+              borderRadius: '6px',
+              border: '1px solid #dbeafe',
+              boxShadow: '0 8px 18px rgba(15, 23, 42, 0.12)',
+            },
+          } as any}
+        >
+          {(activeGroup?.options ?? []).map((type) => (
             <MenuItem
               key={type.value}
               onClick={() => handleTypeSelect(type.value)}
               selected={existingType === type.value}
+              sx={{
+                gap: 1,
+                fontSize: 12,
+                minHeight: 32,
+              }}
             >
+              <TypeBadge badge={type.badge} color={type.color} />
               {type.label}
             </MenuItem>
           ))}
         </Menu>
-
-        <Divider orientation="vertical" flexItem />
-
-        {/* Clear Button */}
-        <IconButton
-          size="small"
-          onClick={handleClear}
-          color="error"
-          title="Remove annotation"
-          sx={{
-            p: 0.5,
-          }}
-        >
-          <ClearIcon sx={{ fontSize: 18 }} />
-        </IconButton>
-      </Paper>
+      </Box>
     </Popper>
   );
 }
